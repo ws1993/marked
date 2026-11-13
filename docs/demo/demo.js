@@ -1,45 +1,36 @@
-/* globals marked, unfetch, ES6Promise, Promise */ // eslint-disable-line no-redeclare
-
-if (!window.Promise) {
-  window.Promise = ES6Promise;
-}
-if (!window.fetch) {
-  window.fetch = unfetch;
-}
-
-onunhandledrejection = function(e) {
+onunhandledrejection = (e) => {
   throw e.reason;
 };
 
-var $loadingElem = document.querySelector('#loading');
-var $mainElem = document.querySelector('#main');
-var $markdownElem = document.querySelector('#markdown');
-var $markedVerElem = document.querySelector('#markedVersion');
-var $commitVerElem = document.querySelector('#commitVersion');
-var $markedVer = document.querySelector('#markedCdn');
-var $optionsElem = document.querySelector('#options');
-var $outputTypeElem = document.querySelector('#outputType');
-var $inputTypeElem = document.querySelector('#inputType');
-var $responseTimeElem = document.querySelector('#responseTime');
-var $previewElem = document.querySelector('#preview');
-var $previewIframe = document.querySelector('#preview iframe');
-var $permalinkElem = document.querySelector('#permalink');
-var $clearElem = document.querySelector('#clear');
-var $htmlElem = document.querySelector('#html');
-var $lexerElem = document.querySelector('#lexer');
-var $panes = document.querySelectorAll('.pane');
-var $inputPanes = document.querySelectorAll('.inputPane');
-var lastInput = '';
-var inputDirty = true;
-var $activeOutputElem = null;
-var search = searchToObject();
-var markedVersions = {
-  master: 'https://cdn.jsdelivr.net/gh/markedjs/marked/marked.min.js'
+const $loadingElem = document.querySelector('#loading');
+const $mainElem = document.querySelector('#main');
+const $markdownElem = document.querySelector('#markdown');
+const $markedVerElem = document.querySelector('#markedVersion');
+const $optionsElem = document.querySelector('#options');
+const $outputTypeElem = document.querySelector('#outputType');
+const $inputTypeElem = document.querySelector('#inputType');
+const $responseTimeElem = document.querySelector('#responseTime');
+const $previewElem = document.querySelector('#preview');
+const $previewIframe = document.querySelector('#preview iframe');
+const $permalinkElem = document.querySelector('#permalink');
+const $clearElem = document.querySelector('#clear');
+const $htmlElem = document.querySelector('#html');
+const $lexerElem = document.querySelector('#lexer');
+const $panes = document.querySelectorAll('.pane');
+const $inputPanes = document.querySelectorAll('.inputPane');
+let lastInput = '';
+let inputDirty = true;
+let $activeOutputElem = null;
+let latestVersion = 'master';
+const search = searchToObject();
+const markedVersions = {
+  master: '../',
+  commonmark: 'commonmark',
+  gfm: 'gfm',
 };
-var markedVersionCache = {};
-var delayTime = 1;
-var checkChangeTimeout = null;
-var markedWorker;
+let delayTime = 1;
+let checkChangeTimeout = null;
+let markedWorker;
 
 $previewIframe.addEventListener('load', handleIframeLoad);
 
@@ -59,33 +50,166 @@ $optionsElem.addEventListener('keyup', handleInput, false);
 $optionsElem.addEventListener('keypress', handleInput, false);
 $optionsElem.addEventListener('keydown', handleInput, false);
 
-$commitVerElem.style.display = 'none';
-$commitVerElem.addEventListener('keypress', handleAddVersion, false);
-
 $clearElem.addEventListener('click', handleClearClick, false);
+
+// --- Theme Toggle Setup ---
+const $themeToggle = document.getElementById('theme-toggle');
+const $themeToggleIcon = $themeToggle ? $themeToggle.querySelector('[data-theme-icon]') : null;
+const $themeToggleText = $themeToggle ? $themeToggle.querySelector('[data-theme-text]') : null;
+
+const THEME_STORAGE_KEY = 'theme-preference';
+const LEGACY_STORAGE_KEY = 'theme';
+const THEME_ORDER = ['system', 'light', 'dark'];
+const TOGGLE_UI = {
+  system: { icon: 'brightness_auto', text: 'System' },
+  light: { icon: 'light_mode', text: 'Light' },
+  dark: { icon: 'dark_mode', text: 'Dark' },
+};
+
+function applyTheme(theme) {
+  if (theme === 'dark') {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+  }
+  document.documentElement.setAttribute('data-theme', theme);
+
+  try {
+    if ($previewIframe && $previewIframe.contentDocument) {
+      if (theme === 'dark') {
+        $previewIframe.contentDocument.documentElement.classList.add('dark');
+      } else {
+        $previewIframe.contentDocument.documentElement.classList.remove('dark');
+      }
+    }
+  } catch {
+    // Ignore cross-origin errors
+  }
+}
+
+function getSystemTheme() {
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+  return 'light';
+}
+
+function sanitisePreference(value) {
+  return THEME_ORDER.includes(value) ? value : null;
+}
+
+function readStoredPreference() {
+  try {
+    const stored = sanitisePreference(localStorage.getItem(THEME_STORAGE_KEY));
+    if (stored) {
+      return stored;
+    }
+    return sanitisePreference(localStorage.getItem(LEGACY_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredPreference(preference) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, preference);
+    if (preference === 'light' || preference === 'dark') {
+      localStorage.setItem(LEGACY_STORAGE_KEY, preference);
+    } else {
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+    }
+  } catch {
+    // Storage might be unavailable; ignore
+  }
+}
+
+function getEffectiveTheme(preference) {
+  return preference === 'system' ? getSystemTheme() : preference;
+}
+
+function updateToggle(preference) {
+  if (!$themeToggle) {
+    return;
+  }
+  const details = TOGGLE_UI[preference] || TOGGLE_UI.system;
+  if ($themeToggleIcon) {
+    $themeToggleIcon.textContent = details.icon;
+  }
+  if ($themeToggleText) {
+    $themeToggleText.textContent = details.text;
+  }
+  $themeToggle.setAttribute('data-theme-mode', preference);
+  const label = `Switch theme (current: ${details.text})`;
+  $themeToggle.setAttribute('aria-label', label);
+  $themeToggle.title = label;
+}
+
+let currentPreference = readStoredPreference() || 'system';
+
+function applyPreference(preference, persist) {
+  currentPreference = preference;
+  const effectiveTheme = getEffectiveTheme(preference);
+  applyTheme(effectiveTheme);
+  document.documentElement.setAttribute('data-theme-preference', preference);
+  updateToggle(preference);
+  if (persist) {
+    writeStoredPreference(preference);
+  }
+}
+
+applyPreference(currentPreference, true);
+
+if ($themeToggle) {
+  $themeToggle.addEventListener('click', function() {
+    const index = THEME_ORDER.indexOf(currentPreference);
+    const nextIndex = (index + 1) % THEME_ORDER.length;
+    const nextPreference = THEME_ORDER[nextIndex];
+    applyPreference(nextPreference, true);
+  });
+}
+
+const systemMatcher = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+if (systemMatcher) {
+  const handleSystemChange = function() {
+    if (currentPreference === 'system') {
+      applyPreference('system', false);
+    }
+  };
+
+  if (typeof systemMatcher.addEventListener === 'function') {
+    systemMatcher.addEventListener('change', handleSystemChange);
+  } else if (typeof systemMatcher.addListener === 'function') {
+    systemMatcher.addListener(handleSystemChange);
+  }
+}
 
 Promise.all([
   setInitialQuickref(),
   setInitialOutputType(),
   setInitialText(),
-  setInitialVersion()
-    .then(setInitialOptions)
-]).then(function() {
-  handleInputChange();
-  handleOutputChange();
-  checkForChanges();
-  setScrollPercent(0);
-  $loadingElem.style.display = 'none';
-  $mainElem.style.display = 'block';
-});
+  setInitialVersion().then(setInitialOptions),
+])
+  .then(() => {
+    handleInputChange();
+    handleOutputChange();
+    checkForChanges();
+    setScrollPercent(0);
+    $loadingElem.style.display = 'none';
+    $mainElem.style.display = 'block';
+  })
+  .catch(() => {
+    $loadingElem.classList.add('loadingError');
+    $loadingElem.textContent =
+      'Failed to load marked. Refresh the page to try again.';
+  });
 
 function setInitialText() {
   if ('text' in search) {
     $markdownElem.value = search.text;
   } else {
     return fetch('./initial.md')
-      .then(function(res) { return res.text(); })
-      .then(function(text) {
+      .then((res) => res.text())
+      .then((text) => {
         if ($markdownElem.value === '') {
           $markdownElem.value = text;
         }
@@ -95,69 +219,37 @@ function setInitialText() {
 
 function setInitialQuickref() {
   return fetch('./quickref.md')
-    .then(function(res) { return res.text(); })
-    .then(function(text) {
+    .then((res) => res.text())
+    .then((text) => {
       document.querySelector('#quickref').value = text;
     });
 }
 
 function setInitialVersion() {
   return fetch('https://data.jsdelivr.com/v1/package/npm/marked')
-    .then(function(res) {
-      return res.json();
-    })
-    .then(function(json) {
-      for (var i = 0; i < json.versions.length; i++) {
-        var ver = json.versions[i];
-        markedVersions[ver] = 'https://cdn.jsdelivr.net/npm/marked@' + ver + '/marked.min.js';
-        var opt = document.createElement('option');
+    .then((res) => res.json())
+    .then((json) => {
+      for (const ver of json.versions) {
+        markedVersions[ver] = 'https://cdn.jsdelivr.net/npm/marked@' + ver;
+        const opt = document.createElement('option');
         opt.textContent = ver;
         opt.value = ver;
         $markedVerElem.appendChild(opt);
       }
-    })
-    .then(function() {
-      return fetch('https://api.github.com/repos/markedjs/marked/commits')
-        .then(function(res) {
-          return res.json();
-        })
-        .then(function(json) {
-          markedVersions.master = 'https://cdn.jsdelivr.net/gh/markedjs/marked@' + json[0].sha + '/marked.min.js';
-        })
-        .catch(function() {
-          // do nothing
-          // uses url without commit
-        });
-    })
-    .then(function() {
-      if (search.version) {
-        if (markedVersions[search.version]) {
-          return search.version;
-        } else {
-          var match = search.version.match(/^(\w+):(.+)$/);
-          if (match) {
-            switch (match[1]) {
-              case 'commit':
-                addCommitVersion(search.version, match[2].substring(0, 7), match[2]);
-                return search.version;
-              case 'pr':
-                return getPrCommit(match[2])
-                  .then(function(commit) {
-                    if (!commit) {
-                      return 'master';
-                    }
-                    addCommitVersion(search.version, 'PR #' + match[2], commit);
-                    return search.version;
-                  });
-            }
-          }
-        }
+
+      if (location.host === 'marked.js.org') {
+        latestVersion = json.tags.latest;
+      } else {
+        $markedVerElem.querySelector('option[value="master"]').textContent =
+          'This Build';
       }
 
-      return 'master';
-    })
-    .then(function(version) {
-      $markedVerElem.value = version;
+      if (search.version && markedVersions[search.version]) {
+        $markedVerElem.value = search.version;
+        return;
+      }
+
+      $markedVerElem.value = latestVersion;
     })
     .then(updateVersion);
 }
@@ -179,61 +271,47 @@ function setInitialOutputType() {
 function handleIframeLoad() {
   lastInput = '';
   inputDirty = true;
+
+  // Apply current theme to the iframe
+  try {
+    const currentTheme = document.documentElement.classList.contains('dark')
+      ? 'dark'
+      : 'light';
+    if ($previewIframe && $previewIframe.contentDocument) {
+      if (currentTheme === 'dark') {
+        $previewIframe.contentDocument.documentElement.classList.add('dark');
+      } else {
+        $previewIframe.contentDocument.documentElement.classList.remove('dark');
+      }
+    }
+  } catch {
+    // Ignore cross-origin errors
+  }
 }
 
+let debounceInputDirty;
 function handleInput() {
-  inputDirty = true;
+  if ($markedVerElem.value === 'gfm') {
+    // GFM api limits requests to 60 per hour so we
+    // are debouncing here to limit unnecessary requests
+    clearTimeout(debounceInputDirty);
+    debounceInputDirty = setTimeout(() => {
+      inputDirty = true;
+    }, 500);
+  } else {
+    inputDirty = true;
+  }
 }
 
 function handleVersionChange() {
-  if ($markedVerElem.value === 'commit' || $markedVerElem.value === 'pr') {
-    $commitVerElem.style.display = '';
-  } else {
-    $commitVerElem.style.display = 'none';
-    updateVersion();
-  }
+  updateVersion();
 }
 
 function handleClearClick() {
   $markdownElem.value = '';
-  $markedVerElem.value = 'master';
-  $commitVerElem.style.display = 'none';
-  updateVersion().then(setDefaultOptions);
-}
-
-function handleAddVersion(e) {
-  if (e.which === 13) {
-    switch ($markedVerElem.value) {
-      case 'commit':
-        var commit = $commitVerElem.value.toLowerCase();
-        if (!commit.match(/^[0-9a-f]{40}$/)) {
-          alert('That is not a valid commit');
-          return;
-        }
-        addCommitVersion('commit:' + commit, commit.substring(0, 7), commit);
-        $markedVerElem.value = 'commit:' + commit;
-        $commitVerElem.style.display = 'none';
-        $commitVerElem.value = '';
-        updateVersion();
-        break;
-      case 'pr':
-        $commitVerElem.disabled = true;
-        var pr = $commitVerElem.value.replace(/\D/g, '');
-        getPrCommit(pr)
-          .then(function(commit) {
-            $commitVerElem.disabled = false;
-            if (!commit) {
-              alert('That is not a valid PR');
-              return;
-            }
-            addCommitVersion('pr:' + pr, 'PR #' + pr, commit);
-            $markedVerElem.value = 'pr:' + pr;
-            $commitVerElem.style.display = 'none';
-            $commitVerElem.value = '';
-            updateVersion();
-          });
-    }
-  }
+  $markedVerElem.value = latestVersion;
+  updateVersion();
+  setDefaultOptions();
 }
 
 function handleInputChange() {
@@ -246,8 +324,8 @@ function handleOutputChange() {
 }
 
 function handleChange(panes, visiblePane) {
-  var active = null;
-  for (var i = 0; i < panes.length; i++) {
+  let active = null;
+  for (let i = 0; i < panes.length; i++) {
     if (panes[i].id === visiblePane) {
       panes[i].style.display = '';
       active = panes[i];
@@ -258,63 +336,40 @@ function handleChange(panes, visiblePane) {
   return active;
 }
 
-function addCommitVersion(value, text, commit) {
-  if (markedVersions[value]) {
-    return;
-  }
-  markedVersions[value] = 'https://cdn.jsdelivr.net/gh/markedjs/marked@' + commit + '/marked.min.js';
-  var opt = document.createElement('option');
-  opt.textContent = text;
-  opt.value = value;
-  $markedVerElem.insertBefore(opt, $markedVerElem.firstChild);
-}
-
-function getPrCommit(pr) {
-  return fetch('https://api.github.com/repos/markedjs/marked/pulls/' + pr + '/commits')
-    .then(function(res) {
-      return res.json();
-    })
-    .then(function(json) {
-      return json[json.length - 1].sha;
-    }).catch(function() {
-      // return undefined
-    });
-}
-
 function setDefaultOptions() {
-  if (window.Worker) {
-    return messageWorker({
-      task: 'defaults',
-      version: markedVersions[$markedVerElem.value]
-    });
-  } else {
-    var defaults = marked.getDefaults();
-    setOptions(defaults);
-  }
+  return messageWorker({
+    task: 'defaults',
+    version: markedVersions[$markedVerElem.value],
+  });
 }
 
 function setOptions(opts) {
   $optionsElem.value = JSON.stringify(
     opts,
-    function(key, value) {
-      if (value && typeof value === 'object' && Object.getPrototypeOf(value) !== Object.prototype) {
+    (key, value) => {
+      if (value !== null
+        && typeof value === 'object'
+        && Object.getPrototypeOf(value) !== Object.prototype
+      ) {
         return undefined;
       }
       return value;
-    }, ' ');
+    },
+    ' ',
+  );
 }
 
 function searchToObject() {
   // modified from https://stackoverflow.com/a/7090123/806777
-  var pairs = location.search.slice(1).split('&');
-  var obj = {};
+  const pairs = location.search.slice(1).split('&');
+  const obj = {};
 
-  for (var i = 0; i < pairs.length; i++) {
+  for (let i = 0; i < pairs.length; i++) {
     if (pairs[i] === '') {
       continue;
     }
 
-    var pair = pairs[i].split('=');
+    const pair = pairs[i].split('=');
 
     obj[decodeURIComponent(pair.shift())] = decodeURIComponent(pair.join('='));
   }
@@ -322,55 +377,22 @@ function searchToObject() {
   return obj;
 }
 
-function isArray(arr) {
-  return Object.prototype.toString.call(arr) === '[object Array]';
-}
-
-function stringRepeat(char, times) {
-  var s = '';
-  for (var i = 0; i < times; i++) {
-    s += char;
-  }
-  return s;
-}
-
-function jsonString(input, level) {
-  level = level || 0;
-  if (isArray(input)) {
-    if (input.length === 0) {
-      return '[]';
-    }
-    var items = [],
-        i;
-    if (!isArray(input[0]) && typeof input[0] === 'object' && input[0] !== null) {
-      for (i = 0; i < input.length; i++) {
-        items.push(stringRepeat(' ', 2 * level) + jsonString(input[i], level + 1));
-      }
-      return '[\n' + items.join('\n') + '\n]';
-    }
-    for (i = 0; i < input.length; i++) {
-      items.push(jsonString(input[i], level));
-    }
-    return '[' + items.join(', ') + ']';
-  } else if (typeof input === 'object' && input !== null) {
-    var props = [];
-    for (var prop in input) {
-      props.push(prop + ':' + jsonString(input[prop], level));
-    }
-    return '{' + props.join(', ') + '}';
-  } else {
-    return JSON.stringify(input);
-  }
-}
-
 function getScrollSize() {
-  var e = $activeOutputElem;
+  if (!$activeOutputElem) {
+    return 0;
+  }
+
+  const e = $activeOutputElem;
 
   return e.scrollHeight - e.clientHeight;
 }
 
 function getScrollPercent() {
-  var size = getScrollSize();
+  if (!$activeOutputElem) {
+    return 1;
+  }
+
+  const size = getScrollSize();
 
   if (size <= 0) {
     return 1;
@@ -380,126 +402,98 @@ function getScrollPercent() {
 }
 
 function setScrollPercent(percent) {
-  $activeOutputElem.scrollTop = percent * getScrollSize();
+  if ($activeOutputElem) {
+    $activeOutputElem.scrollTop = percent * getScrollSize();
+  }
 }
 
 function updateLink() {
-  var outputType = '';
+  let outputType = '';
   if ($outputTypeElem.value !== 'preview') {
-    outputType = 'outputType=' + $outputTypeElem.value + '&';
+    outputType = 'outputType='
+      + $outputTypeElem.value
+      + '&';
   }
 
-  $permalinkElem.href = '?' + outputType + 'text=' + encodeURIComponent($markdownElem.value)
-      + '&options=' + encodeURIComponent($optionsElem.value)
-      + '&version=' + encodeURIComponent($markedVerElem.value);
+  $permalinkElem.href = '?'
+    + outputType
+    + 'text='
+    + encodeURIComponent($markdownElem.value)
+    + '&options='
+    + encodeURIComponent($optionsElem.value)
+    + '&version='
+    + encodeURIComponent($markedVerElem.value);
   history.replaceState('', document.title, $permalinkElem.href);
 }
 
 function updateVersion() {
-  if (window.Worker) {
-    handleInput();
-    return Promise.resolve();
-  }
-  var promise;
-  if (markedVersionCache[$markedVerElem.value]) {
-    promise = Promise.resolve(markedVersionCache[$markedVerElem.value]);
-  } else {
-    promise = fetch(markedVersions[$markedVerElem.value])
-      .then(function(res) { return res.text(); })
-      .then(function(text) {
-        markedVersionCache[$markedVerElem.value] = text;
-        return text;
-      });
-  }
-  return promise.then(function(text) {
-    var script = document.createElement('script');
-    script.textContent = text;
-
-    $markedVer.parentNode.replaceChild(script, $markedVer);
-    $markedVer = script;
-  }).then(handleInput);
+  handleInput();
 }
 
 function checkForChanges() {
-  if (inputDirty && $markedVerElem.value !== 'commit' && $markedVerElem.value !== 'pr' && (typeof marked !== 'undefined' || window.Worker)) {
+  if (inputDirty) {
     inputDirty = false;
 
     updateLink();
 
-    var options = {};
-    var optionsString = $optionsElem.value || '{}';
+    let options = {};
+    const optionsString = $optionsElem.value || '{}';
     try {
-      var newOptions = JSON.parse(optionsString);
+      const newOptions = JSON.parse(optionsString);
       options = newOptions;
       $optionsElem.classList.remove('error');
-    } catch (err) {
+    } catch {
       $optionsElem.classList.add('error');
     }
 
-    var version = markedVersions[$markedVerElem.value];
-    var markdown = $markdownElem.value;
-    var hash = version + markdown + optionsString;
+    const version = markedVersions[$markedVerElem.value];
+    const markdown = $markdownElem.value;
+    const hash = version + markdown + optionsString;
     if (lastInput !== hash) {
       lastInput = hash;
-      if (window.Worker) {
-        delayTime = 100;
-        messageWorker({
-          task: 'parse',
-          version: version,
-          markdown: markdown,
-          options: options
-        });
-      } else {
-        var startTime = new Date();
-        var lexed = marked.lexer(markdown, options);
-        var lexedList = jsonString(lexed);
-        var parsed = marked.parser(lexed, options);
-        var endTime = new Date();
-
-        $previewElem.classList.remove('error');
-        $htmlElem.classList.remove('error');
-        $lexerElem.classList.remove('error');
-        var scrollPercent = getScrollPercent();
-        setParsed(parsed, lexedList);
-        setScrollPercent(scrollPercent);
-        delayTime = endTime - startTime;
-        setResponseTime(delayTime);
-        if (delayTime < 50) {
-          delayTime = 50;
-        } else if (delayTime > 500) {
-          delayTime = 1000;
-        }
-      }
+      delayTime = 100;
+      messageWorker({
+        task: 'parse',
+        version,
+        markdown,
+        options,
+      });
     }
   }
   checkChangeTimeout = window.setTimeout(checkForChanges, delayTime);
 }
 
 function setResponseTime(ms) {
-  var amount = ms;
-  var suffix = 'ms';
+  let amount = ms;
+  let suffix = 'ms';
   if (ms > 1000 * 60 * 60) {
     amount = 'Too Long';
     suffix = '';
   } else if (ms > 1000 * 60) {
-    amount = '>' + Math.floor(ms / (1000 * 60));
+    amount = '>'
+      + Math.floor(ms / (1000 * 60));
     suffix = 'm';
   } else if (ms > 1000) {
-    amount = '>' + Math.floor(ms / 1000);
+    amount = '>'
+      + Math.floor(ms / 1000);
     suffix = 's';
   }
   $responseTimeElem.textContent = amount + suffix;
+  $responseTimeElem.animate(
+    [{ transform: 'scale(1.2)' }, { transform: 'scale(1)' }],
+    200,
+  );
 }
 
 function setParsed(parsed, lexed) {
   try {
     $previewIframe.contentDocument.body.innerHTML = parsed;
-  } catch (ex) {}
+  } catch {}
   $htmlElem.value = parsed;
   $lexerElem.value = lexed;
 }
 
-var workerPromises = {};
+const workerPromises = {};
 function messageWorker(message) {
   if (!markedWorker || markedWorker.working) {
     if (markedWorker) {
@@ -507,32 +501,40 @@ function messageWorker(message) {
       markedWorker.terminate();
     }
     markedWorker = new Worker('worker.js');
-    markedWorker.onmessage = function(e) {
+    markedWorker.onmessage = (e) => {
       clearTimeout(markedWorker.timeout);
       markedWorker.working = false;
       switch (e.data.task) {
-        case 'defaults':
+        case 'defaults': {
           setOptions(e.data.defaults);
           break;
-        case 'parse':
-          $previewElem.classList.remove('error');
-          $htmlElem.classList.remove('error');
-          $lexerElem.classList.remove('error');
-          var scrollPercent = getScrollPercent();
+        }
+        case 'parse': {
+          if (e.data.error) {
+            $previewElem.classList.add('error');
+            $htmlElem.classList.add('error');
+            $lexerElem.classList.add('error');
+          } else {
+            $previewElem.classList.remove('error');
+            $htmlElem.classList.remove('error');
+            $lexerElem.classList.remove('error');
+          }
+          const scrollPercent = getScrollPercent();
           setParsed(e.data.parsed, e.data.lexed);
           setScrollPercent(scrollPercent);
           setResponseTime(e.data.time);
           break;
+        }
       }
       clearTimeout(checkChangeTimeout);
       delayTime = 10;
       checkForChanges();
-      workerPromises[e.data.id]();
+      workerPromises[e.data.id](e.data);
       delete workerPromises[e.data.id];
     };
-    markedWorker.onerror = markedWorker.onmessageerror = function(err) {
+    markedWorker.onerror = markedWorker.onmessageerror = (err) => {
       clearTimeout(markedWorker.timeout);
-      var error = 'There was an error in the Worker';
+      let error = 'There was an error in the Worker';
       if (err) {
         if (err.message) {
           error = err.message;
@@ -552,7 +554,7 @@ function messageWorker(message) {
     markedWorker.working = true;
     workerTimeout(0);
   }
-  return new Promise(function(resolve) {
+  return new Promise((resolve) => {
     message.id = uniqueWorkerMessageId();
     workerPromises[message.id] = resolve;
     markedWorker.postMessage(message);
@@ -560,7 +562,7 @@ function messageWorker(message) {
 }
 
 function uniqueWorkerMessageId() {
-  var id;
+  let id;
   do {
     id = Math.random().toString(36);
   } while (id in workerPromises);
@@ -568,9 +570,15 @@ function uniqueWorkerMessageId() {
 }
 
 function workerTimeout(seconds) {
-  markedWorker.timeout = setTimeout(function() {
+  markedWorker.timeout = setTimeout(() => {
     seconds++;
-    markedWorker.onerror('Marked has taken longer than ' + seconds + ' second' + (seconds > 1 ? 's' : '') + ' to respond...');
+    markedWorker.onerror(
+      'Marked has taken longer than '
+        + seconds
+        + ' second'
+        + (seconds > 1 ? 's' : '')
+        + ' to respond...',
+    );
     workerTimeout(seconds);
   }, 1000);
 }

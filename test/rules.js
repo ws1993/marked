@@ -1,4 +1,5 @@
-import rules from '../src/rules.js';
+import { Lexer } from '../lib/marked.esm.js';
+const rules = Lexer.rules;
 
 const COLOR = {
   reset: '\x1b[0m',
@@ -25,7 +26,7 @@ const COLOR = {
   bgBlue: '\x1b[44m',
   bgMagenta: '\x1b[45m',
   bgCyan: '\x1b[46m',
-  bgWhite: '\x1b[47m'
+  bgWhite: '\x1b[47m',
 };
 
 function propsToString(obj) {
@@ -33,7 +34,7 @@ function propsToString(obj) {
     return null;
   }
   if (obj.constructor.name === 'Object') {
-    if (obj.exec && obj.exec.name === 'noopTest') {
+    if (obj.exec?.name === 'noopTest') {
       return null;
     }
     for (const prop in obj) {
@@ -60,7 +61,7 @@ if (process.argv.length > 2) {
         rule = rule[prop];
       }
     }
-    rulesList[rulePath[0]] = rule && rule[rulePath[0]] ? rule[rulePath[0]] : null;
+    rulesList[rulePath[0]] = rule?.[rulePath[0]] ?? null;
   }
 } else {
   rulesObj = rules;
@@ -70,5 +71,7 @@ rulesObj = propsToString(rulesObj);
 let output = JSON.stringify(rulesObj, null, 2);
 output = output.replace(/^(\s*)"(.*)": null,?$/gm, `$1${COLOR.fgGreen}$2${COLOR.reset}: undefined`);
 output = output.replace(/^(\s*)"(.*)": {$/gm, `$1${COLOR.fgGreen}$2${COLOR.reset}: {`);
-output = output.replace(/^(\s*)"(.*)": "(.*)",?$/gm, `$1${COLOR.fgGreen}$2${COLOR.reset}: ${COLOR.fgRed}$3${COLOR.reset}`);
+output = output.replace(/^(\s*)"(.*)": "(.*)",?$/gm, (...p) => {
+  return `${p[1]}${COLOR.fgGreen}${p[2]}${COLOR.reset}: ${COLOR.fgRed}${p[3].replace(/\\\\/g, '\\')}${COLOR.reset}`;
+});
 console.log(output, COLOR.reset);

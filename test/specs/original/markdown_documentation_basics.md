@@ -56,7 +56,7 @@ Markdown:
 
     A First Level Header
     ====================
-    
+
     A Second Level Header
     ---------------------
 
@@ -66,11 +66,11 @@ Markdown:
 
     The quick brown fox jumped over the lazy
     dog's back.
-    
+
     ### Header 3
 
     > This is a blockquote.
-    > 
+    >
     > This is the second paragraph in the blockquote.
     >
     > ## This is an H2 in a blockquote
@@ -79,23 +79,23 @@ Markdown:
 Output:
 
     <h1>A First Level Header</h1>
-    
+
     <h2>A Second Level Header</h2>
-    
+
     <p>Now is the time for all good men to come to
     the aid of their country. This is just a
     regular paragraph.</p>
-    
+
     <p>The quick brown fox jumped over the lazy
     dog's back.</p>
-    
+
     <h3>Header 3</h3>
-    
+
     <blockquote>
         <p>This is a blockquote.</p>
-        
+
         <p>This is the second paragraph in the blockquote.</p>
-        
+
         <h2>This is an H2 in a blockquote</h2>
     </blockquote>
 
@@ -109,7 +109,7 @@ Markdown:
 
     Some of these words *are emphasized*.
     Some of these words _are emphasized also_.
-    
+
     Use two asterisks for **strong emphasis**.
     Or, if you prefer, __use two underscores instead__.
 
@@ -117,17 +117,17 @@ Output:
 
     <p>Some of these words <em>are emphasized</em>.
     Some of these words <em>are emphasized also</em>.</p>
-    
+
     <p>Use two asterisks for <strong>strong emphasis</strong>.
     Or, if you prefer, <strong>use two underscores instead</strong>.</p>
-   
+
 
 
 ## Lists ##
 
 Unordered (bulleted) lists use asterisks, pluses, and hyphens (`*`,
 `+`, and `-`) as list markers. These three markers are
-interchangable; this:
+interchangeable; this:
 
     *   Candy.
     *   Gum.
@@ -173,7 +173,7 @@ list item text. You can create multi-paragraph list items by indenting
 the paragraphs by 4 spaces or 1 tab:
 
     *   A list item.
-    
+
         With multiple paragraphs.
 
     *   Another item in the list.
@@ -185,7 +185,7 @@ Output:
     <p>With multiple paragraphs.</p></li>
     <li><p>Another item in the list.</p></li>
     </ul>
-    
+
 
 
 ### Links ###
@@ -274,16 +274,16 @@ it easy to use Markdown to write about HTML example code:
     I strongly recommend against using any `<blink>` tags.
 
     I wish SmartyPants used named entities like `&mdash;`
-    instead of decimal-encoded entites like `&#8212;`.
+    instead of decimal-encoded entities like `&#8212;`.
 
 Output:
 
     <p>I strongly recommend against using any
     <code>&lt;blink&gt;</code> tags.</p>
-    
+
     <p>I wish SmartyPants used named entities like
     <code>&amp;mdash;</code> instead of decimal-encoded
-    entites like <code>&amp;#8212;</code>.</p>
+    entities like <code>&amp;#8212;</code>.</p>
 
 
 To specify an entire block of pre-formatted code, indent every line of
@@ -303,7 +303,7 @@ Output:
 
     <p>If you want your page to validate under XHTML 1.0 Strict,
     you've got to put paragraph tags in your blockquotes:</p>
-    
+
     <pre><code>&lt;blockquote&gt;
         &lt;p&gt;For example.&lt;/p&gt;
     &lt;/blockquote&gt;
